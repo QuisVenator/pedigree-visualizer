@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="app_title">HoF Pedigree App</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; overflow: hidden; }
+        
+        /* Sidebar Styles */
+        #sidebar { width: 300px; background: #f4f4f4; padding: 20px; border-right: 1px solid #ddd; display: flex; flex-direction: column; gap: 10px; }
+        h2 { margin-top: 0; }
+        .stat-box { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        button { padding: 10px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 14px; }
+        button:hover { background: #0056b3; }
+        button.secondary { background: #6c757d; }
+        button.remove { background: #dc3545; }
+        
+        /* Graph Styles */
+        #graph-container { flex-grow: 1; position: relative; background: #fff; }
+        .node circle { fill: #fff; stroke: #333; stroke-width: 2px; cursor: pointer; transition: all 0.3s; }
+        .node circle:hover { fill: #e6f2ff; stroke: #007bff; }
+        .node text { font: 12px sans-serif; pointer-events: none; text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff; }
+        .link { fill: none; stroke: #ccc; stroke-width: 2px; }
+        
+        /* Hall of Fame Visuals */
+        .node.hof circle { stroke: #d4af37; stroke-width: 4px; fill: #fff8dc; } /* Gold */
+        .node.hof text { font-weight: bold; fill: #8a6d1c; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <h2>Horse Pedigree</h2>
+    <div id="selected-horse-panel" class="stat-box" style="display:none;">
+        <h3 id="panel-name">Pferd Name</h3>
+        <p><strong>HoF Status:</strong> <span id="panel-status">No</span></p>
+        <p><strong>HoF Genetik:</strong> <span id="panel-score">0%</span></p>
+        <hr>
+        <button id="btn-toggle-hof">Hall of Fame umschalten</button>
+        <div style="margin-top:10px; display:flex; gap:5px;">
+            <button id="btn-add-sire" class="secondary">Vatertier Hinzufügen</button>
+            <button id="btn-add-dam" class="secondary">Muttertier Hinzufügen</button>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:5px;">
+            <button id="btn-remove-sire" class="remove">Vatertier Löschen</button>
+            <button id="btn-remove-dam" class="remove">Muttertier Löschen</button>
+        </div>
+    </div>
+    <div id="empty-state" class="stat-box">
+        <p>Pferd auswählen um zu bearbeiten oder Eltern einzutragen.</p>
+    </div>
+    <hr>
+    <h3>Data Controls</h3>
+    <div style="display:flex; gap:5px; flex-direction:column;">
+        <button onclick="exportData()" style="background:#28a745;">💾 Save (Download)</button>
+        <button onclick="document.getElementById('file-input').click()" style="background:#17a2b8;">📂 Load (Upload)</button>
+        <input type="file" id="file-input" style="display:none;" onchange="importData(this)">
+    </div>
+    <button onclick="resetData()" style="background:#dc3545; margin-top:5px;">🗑️ Reset / Clear All</button>
+</div>
+
+<div id="graph-container"></div>
+
+<script>
+    let selectedHorseId = null;
+
+    // --- 2. LOGIC / CALCULATIONS ---
+
+    // Find horse helper
+    const getHorse = (id) => horses.find(h => h.id === id);
+
+    // The Recursive Percentage Calculator
+    function calculateScore(id) {
+        const horse = getHorse(id);
+        if (!horse) return 0;
+
+        if (horse.isHoF) return 100;
+
+        const sireScore = calculateScore(horse.sireId);
+        const damScore = calculateScore(horse.damId);
+
+        return (sireScore / 2) + (damScore / 2);
+    }
+
+    // --- 3. D3 RENDERING ---
+
+    const width = document.getElementById('graph-container').clientWidth;
+    const height = document.getElementById('graph-container').clientHeight;
+    
+    // Create SVG once
+    const svg = d3.select("#graph-container").append("svg")
+        .attr("width", width)
+        .attr("height", height)
+        .call(d3.zoom().on("zoom", (e) => g.attr("transform", e.transform)))
+        .append("g");
+    
+    const g = svg.append("g").attr("transform", "translate(50, 0)"); // Initial offset
+
+    function renderTree() {
+        const buildHierarchy = (id) => {
+            const h = getHorse(id);
+            if (!h) return null;
+            
+            const node = { ...h, score: calculateScore(id) };
+            const children = [];
+            
+            const sire = buildHierarchy(h.sireId);
+            const dam = buildHierarchy(h.damId);
+            
+            if (sire) children.push(sire);
+            if (dam) children.push(dam);
+            
+            if (children.length) node.children = children;
+            return node;
+        };
+
+        const rootData = buildHierarchy("h1");
+        
+        // D3 Tree Layout
+        const treeLayout = d3.tree().size([height - 100, width - 200]);
+        const root = d3.hierarchy(rootData);
+        treeLayout(root);
+
+        // --- DRAW LINKS ---
+        const links = g.selectAll(".link").data(root.links(), d => d.target.data.id);
+        
+        links.enter().append("path")
+            .attr("class", "link")
+            .merge(links)
+            .transition().duration(500)
+            .attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x));
+            
+        links.exit().remove();
+
+        // --- DRAW NODES ---
+        const nodes = g.selectAll(".node").data(root.descendants(), d => d.data.id);
+
+        const nodeEnter = nodes.enter().append("g")
+            .attr("class", d => d.data.isHoF ? "node hof" : "node")
+            .attr("transform", d => `translate(${d.y},${d.x})`)
+            .on("click", (e, d) => selectHorse(d.data.id));
+
+        nodeEnter.append("circle").attr("r", 15);
+        
+        nodeEnter.append("text")
+            .attr("dy", -20)
+            .attr("text-anchor", "middle")
+            .text(d => d.data.name);
+
+        nodeEnter.append("text")
+            .attr("dy", 4)
+            .attr("text-anchor", "middle")
+            .style("font-size", "10px")
+            .text(d => d.data.score + "%");
+
+        // Update existing nodes (animation and style updates)
+        const nodeUpdate = nodes.merge(nodeEnter);
+        
+        nodeUpdate.transition().duration(500)
+            .attr("transform", d => `translate(${d.y},${d.x})`)
+            .attr("class", d => d.data.isHoF ? "node hof" : "node"); // Update HoF styling
+
+        nodeUpdate.select("text").text(d => d.data.name); // Update name text
+        nodeUpdate.select("text:last-child").text(d => d.data.score + "%"); // Update score text
+
+        nodes.exit().remove();
+    }
+
+    // --- 4. INTERACTION HANDLERS ---
+
+    function selectHorse(id) {
+        selectedHorseId = id;
+        const horse = getHorse(id);
+        const score = calculateScore(id);
+
+        // Update UI
+        document.getElementById("empty-state").style.display = "none";
+        const panel = document.getElementById("selected-horse-panel");
+        panel.style.display = "block";
+        
+        document.getElementById("panel-name").textContent = horse.name;
+        document.getElementById("panel-status").textContent = horse.isHoF ? "Ja (100%)" : "Nein";
+        document.getElementById("panel-score").textContent = score + "%";
+        
+        // Show/Hide Add Parent Buttons
+        document.getElementById("btn-add-sire").style.display = horse.sireId ? "none" : "inline-block";
+        document.getElementById("btn-add-dam").style.display = horse.damId ? "none" : "inline-block";
+        document.getElementById("btn-remove-sire").style.display = horse.sireId ? "inline-block" : "none";
+        document.getElementById("btn-remove-dam").style.display = horse.damId ? "inline-block" : "none";
+    }
+
+    // Button: Toggle HoF
+    document.getElementById("btn-toggle-hof").onclick = () => {
+        if (!selectedHorseId) return;
+        const horse = getHorse(selectedHorseId);
+        horse.isHoF = !horse.isHoF;
+
+        saveToLocal();
+
+        renderTree();
+        selectHorse(selectedHorseId);
+    };
+
+    // Button: Add Parent (Vatertier/Muttertier)
+    function addParent(type) {
+        if (!selectedHorseId) return;
+        const child = getHorse(selectedHorseId);
+        
+        const newId = "h" + (Math.random() * 10000).toFixed(0);
+        const newName = prompt(`Namen des ${type}:`, `${type} of ${child.name}`);
+        
+        if (!newName) return;
+
+        const newHorse = {
+            id: newId,
+            name: newName,
+            isHoF: false,
+            sireId: null,
+            damId: null
+        };
+        
+        horses.push(newHorse);
+
+        if (type === "Vatertier") child.sireId = newId;
+        else child.damId = newId;
+
+        saveToLocal();
+
+        renderTree();
+        selectHorse(selectedHorseId);
+    }
+
+    // Button: Remove Parent (Vatertier/Muttertier)
+    function removeParent(type) {
+        if (!selectedHorseId) return;
+        const child = getHorse(selectedHorseId);
+        
+        if (type === "Vatertier") child.sireId = null;
+        else child.damId = null;
+
+        saveToLocal();
+
+        renderTree();
+        selectHorse(selectedHorseId);
+    }
+
+    document.getElementById("btn-add-sire").onclick = () => addParent("Vatertier");
+    document.getElementById("btn-add-dam").onclick = () => addParent("Muttertier");
+    document.getElementById("btn-remove-sire").onclick = () => removeParent("Vatertier");
+    document.getElementById("btn-remove-dam").onclick = () => removeParent("Muttertier");
+
+    
+    // --- 5. DATA PERSISTENCE (IMPORT/EXPORT) ---
+
+    // EXPORT: Downloads the current 'horses' array as a .json file
+    function exportData() {
+        const dataStr = JSON.stringify(horses, null, 2); // Pretty print JSON
+        const blob = new Blob([dataStr], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        
+        // Create a fake link and click it to trigger download
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "horse_pedigree_data.json";
+        document.body.appendChild(a);
+        a.click();
+        
+        // Cleanup
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    }
+
+    // IMPORT: Reads a user-selected file and replaces 'horses' array
+    function importData(inputElement) {
+        const file = inputElement.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        
+        reader.onload = function(e) {
+            try {
+                const json = JSON.parse(e.target.result);
+                
+                // Basic validation: check if it looks like an array
+                if (Array.isArray(json)) {
+                    horses = json;
+                    selectedHorseId = null;
+                    
+                    document.getElementById("selected-horse-panel").style.display = "none";
+                    document.getElementById("empty-state").style.display = "block";
+
+                    saveToLocal();
+                    
+                    renderTree(); 
+                    alert("Daten wurden erfolgreich importiert!");
+                } else {
+                    alert("Fehler: Falsches Format");
+                }
+            } catch (err) {
+                alert("Fehler beim Lesen der Datei: " + err);
+            }
+        };
+        
+        reader.readAsText(file);
+        // Reset input so you can load the same file again if needed
+        inputElement.value = ""; 
+    }
+
+    // --- LOCAL STORAGE HELPERS ---
+
+    const STORAGE_KEY = "horse_app_data_v1";
+
+    function saveToLocal() {
+        // Convert the array to a string and save it
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(horses));
+        console.log("Data auto-saved!"); 
+    }
+
+    function loadFromLocal() {
+        const savedData = localStorage.getItem(STORAGE_KEY);
+        if (savedData) {
+            return JSON.parse(savedData);
+        }
+        return null;
+    }
+
+    function resetData() {
+        if (confirm("Sind Sie sicher? Dies löscht alle Daten und startet einen neuen Stammbaum.")) {
+            localStorage.removeItem(STORAGE_KEY); // Delete the save file
+            location.reload(); // Reload the page to reset the app
+        }
+    }
+
+    // --- Start! ---
+
+    // Initial Data: Just one horse to start
+    let horses = loadFromLocal()
+    if (!horses) {
+        horses = [
+            { id: "h1", name: "Mein Pferd", isHoF: false, sireId: null, damId: null }
+        ];
+    }
+
+    renderTree();
+
+</script>
+</body>
+</html>
