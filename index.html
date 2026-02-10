@@ -23,6 +23,16 @@
         .node circle:hover { fill: #e6f2ff; stroke: #007bff; }
         .node text { font: 12px sans-serif; pointer-events: none; text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff; }
         .link { fill: none; stroke: #ccc; stroke-width: 2px; }
+        .node.selected circle {
+            stroke: #ff4500;  /* Orange-Red for visibility */
+            stroke-width: 4px;
+            fill: #fff5ee;    /* Slight tint */
+        }
+        .node.hof.selected circle {
+            stroke: #ff4500; /* Selection overrides Gold border color */
+            stroke-width: 5px;
+            stroke-dasharray: 5, 2; /* Optional: dashed line to show it is special */
+        }
         
         /* Hall of Fame Visuals */
         .node.hof circle { stroke: #d4af37; stroke-width: 4px; fill: #fff8dc; } /* Gold */
@@ -49,6 +59,15 @@
         <div style="margin-top:10px; display:flex; gap:5px;">
             <button id="btn-remove-sire" class="remove">Vatertier Löschen</button>
             <button id="btn-remove-dam" class="remove">Muttertier Löschen</button>
+        </div>
+        <hr>
+        <div id="link-existing-panel" style="display:none;">
+            <h4>Bekanntes Pferd als Elternteil</h4>
+            <select id="existing-horse-select" style="width:100%; padding:5px; margin-bottom:5px;"></select>
+            <div style="display:flex; gap:5px;">
+                <button onclick="linkExisting('Sire')" style="flex:1; background:#6f42c1;">Als Vatertier</button>
+                <button onclick="linkExisting('Dam')" style="flex:1; background:#e83e8c;">As Muttertier</button>
+            </div>
         </div>
     </div>
     <div id="empty-state" class="stat-box">
@@ -96,12 +115,16 @@
     const svg = d3.select("#graph-container").append("svg")
         .attr("width", width)
         .attr("height", height)
-        .call(d3.zoom().on("zoom", (e) => g.attr("transform", e.transform)))
-        .append("g");
-    
-    const g = svg.append("g").attr("transform", "translate(50, 0)"); // Initial offset
+        .call(d3.zoom().on("zoom", (e) => mainGroup.attr("transform", e.transform)));
+
+    const mainGroup = svg.append("g").attr("transform", "translate(50, 0)");
+
+    // KEY FIX: Create explicit layers so Links are ALWAYS behind Nodes
+    const linkLayer = mainGroup.append("g").attr("class", "link-layer");
+    const nodeLayer = mainGroup.append("g").attr("class", "node-layer");
 
     function renderTree() {
+        // 1. Build Data Hierarchy
         const buildHierarchy = (id) => {
             const h = getHorse(id);
             if (!h) return null;
@@ -112,6 +135,7 @@
             const sire = buildHierarchy(h.sireId);
             const dam = buildHierarchy(h.damId);
             
+            // Note: D3 Tree typically draws children (parents) to the right
             if (sire) children.push(sire);
             if (dam) children.push(dam);
             
@@ -119,31 +143,42 @@
             return node;
         };
 
-        const rootData = buildHierarchy("h1");
-        
-        // D3 Tree Layout
+        const rootData = buildHierarchy(horses[0].id);
+        if (!rootData) return;
+
+        // 2. Compute Layout
         const treeLayout = d3.tree().size([height - 100, width - 200]);
         const root = d3.hierarchy(rootData);
         treeLayout(root);
 
-        // --- DRAW LINKS ---
-        const links = g.selectAll(".link").data(root.links(), d => d.target.data.id);
+        // 3. DRAW LINKS (into linkLayer)
+        // We use .selectAll with a key function (d.target.data.id) to track specific links
+        const links = linkLayer.selectAll(".link")
+            .data(root.links(), d => d.target.data.id);
         
         links.enter().append("path")
             .attr("class", "link")
+            .attr("d", d3.linkHorizontal()
+                .x(d => d.y)
+                .y(d => d.x)
+            )
             .merge(links)
             .transition().duration(500)
-            .attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x));
+            .attr("d", d3.linkHorizontal()
+                .x(d => d.y)
+                .y(d => d.x)
+            );
             
         links.exit().remove();
 
-        // --- DRAW NODES ---
-        const nodes = g.selectAll(".node").data(root.descendants(), d => d.data.id);
+        // 4. DRAW NODES (into nodeLayer)
+        const nodes = nodeLayer.selectAll(".node")
+            .data(root.descendants(), d => d.data.id);
 
         const nodeEnter = nodes.enter().append("g")
-            .attr("class", d => d.data.isHoF ? "node hof" : "node")
+            .attr("class", "node") // Base class
             .attr("transform", d => `translate(${d.y},${d.x})`)
-            .on("click", (e, d) => selectHorse(d.data.id));
+            .on("click", (e, d) => selectHorse(d.data.id)); // Click handler
 
         nodeEnter.append("circle").attr("r", 15);
         
@@ -158,15 +193,22 @@
             .style("font-size", "10px")
             .text(d => d.data.score + "%");
 
-        // Update existing nodes (animation and style updates)
+        // UPDATE: Apply styles to new AND existing nodes
         const nodeUpdate = nodes.merge(nodeEnter);
         
         nodeUpdate.transition().duration(500)
-            .attr("transform", d => `translate(${d.y},${d.x})`)
-            .attr("class", d => d.data.isHoF ? "node hof" : "node"); // Update HoF styling
+            .attr("transform", d => `translate(${d.y},${d.x})`);
 
-        nodeUpdate.select("text").text(d => d.data.name); // Update name text
-        nodeUpdate.select("text:last-child").text(d => d.data.score + "%"); // Update score text
+        // DYNAMIC STYLING: Here is where we handle "HoF" and "Selected"
+        nodeUpdate.attr("class", d => {
+            let classes = "node";
+            if (d.data.isHoF) classes += " hof";
+            if (d.data.id === selectedHorseId) classes += " selected"; // <--- Highlight Logic
+            return classes;
+        });
+
+        nodeUpdate.select("text").text(d => d.data.name); 
+        nodeUpdate.select("text:last-child").text(d => d.data.score + "%");
 
         nodes.exit().remove();
     }
@@ -186,12 +228,36 @@
         document.getElementById("panel-name").textContent = horse.name;
         document.getElementById("panel-status").textContent = horse.isHoF ? "Ja (100%)" : "Nein";
         document.getElementById("panel-score").textContent = score + "%";
+        const dropdown = document.getElementById("existing-horse-select");
+
+        dropdown.innerHTML = ""; // Clear old options
+
+        // Filter list: exclude self
+        const otherHorses = horses.filter(h => h.id !== id);
+        
+        // Sort alphabetically for easier finding
+        otherHorses.sort((a, b) => a.name.localeCompare(b.name));
+
+        otherHorses.forEach(h => {
+            const option = document.createElement("option");
+            option.value = h.id;
+            option.textContent = h.name;
+            dropdown.appendChild(option);
+        });
+
+        // Show the panel
+        document.getElementById("link-existing-panel").style.display = "block";
         
         // Show/Hide Add Parent Buttons
         document.getElementById("btn-add-sire").style.display = horse.sireId ? "none" : "inline-block";
         document.getElementById("btn-add-dam").style.display = horse.damId ? "none" : "inline-block";
         document.getElementById("btn-remove-sire").style.display = horse.sireId ? "inline-block" : "none";
         document.getElementById("btn-remove-dam").style.display = horse.damId ? "inline-block" : "none";
+
+        d3.selectAll(".node").classed("selected", false);
+        d3.selectAll(".node")
+            .filter(d => d.data.id === id)
+            .classed("selected", true);
     }
 
     // Button: Toggle HoF
@@ -250,6 +316,51 @@
 
         renderTree();
         selectHorse(selectedHorseId);
+    }
+
+    // Button: Add existing
+    function linkExisting(type) {
+        if (!selectedHorseId) return;
+
+        const child = getHorse(selectedHorseId);
+        const parentId = document.getElementById("existing-horse-select").value;
+        
+        if (!parentId) {
+            alert("Bitte ein " + type + " auswählen.");
+            return;
+        }
+
+        if (checksForCycle(selectedHorseId, parentId)) {
+            alert("Zeitreisende Pferde werden aktuell noch nicht unterstützt!\n(Die versuchte Verbindung würde ein Tier zu seinem eigenen Vorfahren machen)");
+            return;
+        }
+
+        if (type === "Vatertier") {
+            child.sireId = parentId;
+        } else {
+            child.damId = parentId;
+        }
+
+        // 3. Save and Refresh
+        saveToLocal();
+        renderTree(); // Re-draw the graph
+        selectHorse(selectedHorseId); // Re-populate sidebar
+    }
+
+    function checksForCycle(childId, potentialParentId) {
+        if (!potentialParentId) return false;
+        if (childId === potentialParentId) return true;
+
+        function isAncestor(currentId, targetId) {
+            if (!currentId) return false;
+            if (currentId === targetId) return true; // Time travel breedin detected!
+            
+            const current = getHorse(currentId);
+            return isAncestor(current.sireId, targetId) || isAncestor(current.damId, targetId);
+        }
+
+        // We check: Is 'childId' already an ancestor of 'potentialParentId'?
+        return isAncestor(potentialParentId, childId);
     }
 
     // Button: Remove Parent (Vatertier/Muttertier)
