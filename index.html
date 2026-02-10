@@ -19,23 +19,23 @@
         
         /* Graph Styles */
         #graph-container { flex-grow: 1; position: relative; background: #fff; }
-        .node circle { fill: #fff; stroke: #333; stroke-width: 2px; cursor: pointer; transition: all 0.3s; }
-        .node circle:hover { fill: #e6f2ff; stroke: #007bff; }
+        .node path { fill: #fff; stroke: #333; stroke-width: 2px; cursor: pointer; transition: all 0.3s; }
+        .node path:hover { fill: #e6f2ff; stroke: #007bff; }
         .node text { font: 12px sans-serif; pointer-events: none; text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff; }
         .link { fill: none; }
-        .node.selected circle {
+        .node.selected path {
             stroke: #ff4500;  /* Orange-Red for visibility */
             stroke-width: 4px;
             fill: #fff5ee;    /* Slight tint */
         }
-        .node.hof.selected circle {
+        .node.hof.selected path {
             stroke: #ff4500; /* Selection overrides Gold border color */
             stroke-width: 5px;
             stroke-dasharray: 5, 2; /* Optional: dashed line to show it is special */
         }
         
         /* Hall of Fame Visuals */
-        .node.hof circle { stroke: #d4af37; stroke-width: 4px; fill: #fff8dc; } /* Gold */
+        .node.hof path { stroke: #d4af37; stroke-width: 4px; fill: #fff8dc; } /* Gold */
         .node.hof text { font-weight: bold; fill: #8a6d1c; }
     </style>
 </head>
@@ -61,14 +61,26 @@
             <button id="btn-remove-dam" class="remove">Muttertier Löschen</button>
         </div>
         <hr>
-        <div id="link-existing-panel" style="display:none;">
-            <h4>Bekanntes Pferd als Elternteil</h4>
-            <select id="existing-horse-select" style="width:100%; padding:5px; margin-bottom:5px;"></select>
-            <div style="display:flex; gap:5px;">
-                <button onclick="linkExisting('Sire')" style="flex:1; background:#6f42c1;">Als Vatertier</button>
-                <button onclick="linkExisting('Dam')" style="flex:1; background:#e83e8c;">As Muttertier</button>
+        <hr>
+        <div id="link-existing-panel" style="display:none; margin-top:10px;">
+            
+            <div style="margin-bottom:15px;">
+                <label style="font-size:12px; font-weight:bold; color:#555;">Bekanntes Vatertier:</label>
+                <div style="display:flex; gap:5px;">
+                    <select id="existing-sire-select" style="flex-grow:1;"></select>
+                    <button onclick="linkExisting('Sire')" style="background:#6f42c1; padding:5px 10px;">Link</button>
+                </div>
             </div>
-        </div>
+
+            <div>
+                <label style="font-size:12px; font-weight:bold; color:#555;">Bekanntes Muttertier:</label>
+                <div style="display:flex; gap:5px;">
+                    <select id="existing-dam-select" style="flex-grow:1;"></select>
+                    <button onclick="linkExisting('Dam')" style="background:#e83e8c; padding:5px 10px;">Link</button>
+                </div>
+            </div>
+
+</div>
     </div>
     <div id="empty-state" class="stat-box">
         <p>Pferd auswählen um zu bearbeiten oder Eltern einzutragen.</p>
@@ -196,7 +208,18 @@
             .attr("transform", d => `translate(${d.y},${d.x})`)
             .on("click", (e, d) => selectHorse(d.data.id));
 
-        nodeEnter.append("circle").attr("r", 15);
+        // Define the shape generator
+        // Size 700 is roughly equivalent to a radius 15 circle (Area = pi * r^2)
+        const symbolGenerator = d3.symbol()
+            .size(700) 
+            .type(d => {
+                if (d.data.sex === 'male') return d3.symbolSquare;
+                return d3.symbolCircle;
+            });
+
+        // Append a 'path' element instead of a circle
+        nodeEnter.append("path")
+            .attr("d", symbolGenerator);
         
         nodeEnter.append("text")
             .attr("dy", -20)
@@ -243,21 +266,30 @@
         document.getElementById("panel-name").textContent = horse.name;
         document.getElementById("panel-status").textContent = horse.isHoF ? "Ja (100%)" : "Nein";
         document.getElementById("panel-score").textContent = score.toFixed(10) + "%";
-        const dropdown = document.getElementById("existing-horse-select");
 
-        dropdown.innerHTML = ""; // Clear old options
 
-        // Filter list: exclude self
-        const otherHorses = horses.filter(h => h.id !== id);
+        const sireSelect = document.getElementById("existing-sire-select");
+        const damSelect = document.getElementById("existing-dam-select");
         
-        // Sort alphabetically for easier finding
+        sireSelect.innerHTML = "";
+        damSelect.innerHTML = "";
+
+        // 1. Get all potential parents (exclude self)
+        const otherHorses = horses.filter(h => h.id !== id);
         otherHorses.sort((a, b) => a.name.localeCompare(b.name));
 
+        // 2. Filter and Fill
         otherHorses.forEach(h => {
             const option = document.createElement("option");
             option.value = h.id;
             option.textContent = h.name;
-            dropdown.appendChild(option);
+            
+            // Strict Filter: Only show Males in Sire list, Females in Dam list
+            if (h.sex === 'male') {
+                sireSelect.appendChild(option);
+            } else {
+                damSelect.appendChild(option);
+            }
         });
 
         // Show the panel
@@ -309,6 +341,7 @@
         if (!selectedHorseId) return;
         const child = getHorse(selectedHorseId);
         
+        const newSex = type === "Vatertier" ? "male" : "female";
         const newId = "h" + (Math.random() * 10000).toFixed(0);
         const newName = prompt(`Namen des ${type}:`, `${type} of ${child.name}`);
         
@@ -319,7 +352,8 @@
             name: newName,
             isHoF: false,
             sireId: null,
-            damId: null
+            damId: null,
+            sex: newSex
         };
         
         horses.push(newHorse);
@@ -338,7 +372,12 @@
         if (!selectedHorseId) return;
 
         const child = getHorse(selectedHorseId);
-        const parentId = document.getElementById("existing-horse-select").value;
+        
+        if (type === "Vatertier") {
+            parentId = document.getElementById("existing-sire-select").value;
+        } else {
+            parentId = document.getElementById("existing-dam-select").value;
+        }
         
         if (!parentId) {
             alert("Bitte ein " + type + " auswählen.");
@@ -508,17 +547,43 @@
         }
     }
 
+    function createRootHorse() {
+        // 1. Ask for Name
+        let name = prompt("Willkomen! Bitte Named des analysierten Pferdes angeben:");
+        if (!name || name.trim() === "") {
+            name = "Mein Pferd"; // Fallback so the app doesn't break
+        }
+
+        // 2. Ask for Gender
+        // confirm() returns TRUE for OK (Male) and FALSE for Cancel (Female)
+        const isMale = confirm(`Ist "${name}" ein Hengst?\n\nOK für Hengs.\nCancel für Stute.`);
+        const sex = isMale ? 'male' : 'female';
+
+        // 3. Create the Root Object
+        const rootHorse = {
+            id: "h1",
+            name: name,
+            isHoF: false,
+            sireId: null,
+            damId: null,
+            sex: sex
+        };
+
+        // 4. Save and Start
+        horses = [rootHorse];
+        saveToLocal();
+        renderTree();
+    }
+
     // --- Start! ---
 
     // Initial Data: Just one horse to start
     let horses = loadFromLocal()
-    if (!horses) {
-        horses = [
-            { id: "h1", name: "Mein Pferd", isHoF: false, sireId: null, damId: null }
-        ];
+    if (!horses || horses.length === 0) {
+        createRootHorse();
+    } else {
+        renderTree();
     }
-
-    renderTree();
 
 </script>
 </body>
