@@ -34,7 +34,10 @@
 <div id="sidebar">
     <h2>Horse Pedigree</h2>
     <div id="selected-horse-panel" class="stat-box" style="display:none;">
-        <h3 id="panel-name">Pferd Name</h3>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <h3 id="panel-name" style="margin:0;">Pferd Name</h3>
+            <button onclick="editName()" style="padding:2px 8px; font-size:12px; background:#6c757d;">✏️</button>
+        </div>
         <p><strong>HoF Status:</strong> <span id="panel-status">No</span></p>
         <p><strong>HoF Genetik:</strong> <span id="panel-score">0%</span></p>
         <hr>
@@ -52,13 +55,13 @@
         <p>Pferd auswählen um zu bearbeiten oder Eltern einzutragen.</p>
     </div>
     <hr>
-    <h3>Data Controls</h3>
+    <h3>Daten</h3>
     <div style="display:flex; gap:5px; flex-direction:column;">
-        <button onclick="exportData()" style="background:#28a745;">💾 Save (Download)</button>
-        <button onclick="document.getElementById('file-input').click()" style="background:#17a2b8;">📂 Load (Upload)</button>
+        <button onclick="exportData()" style="background:#28a745;">💾 Kopie Speichern</button>
+        <button onclick="document.getElementById('file-input').click()" style="background:#17a2b8;">📂 Daten Laden</button>
         <input type="file" id="file-input" style="display:none;" onchange="importData(this)">
     </div>
-    <button onclick="resetData()" style="background:#dc3545; margin-top:5px;">🗑️ Reset / Clear All</button>
+    <button onclick="resetData()" style="background:#dc3545; margin-top:5px;">🗑️ Zurücksetzen</button>
 </div>
 
 <div id="graph-container"></div>
@@ -203,6 +206,23 @@
         selectHorse(selectedHorseId);
     };
 
+    // Button: Edit Name
+    function editName() {
+        if (!selectedHorseId) return;
+        const horse = getHorse(selectedHorseId);
+
+        const newName = prompt("Neuer Name für dieses Pferd:", horse.name);
+        if (!newName || newName.trim() === "") return;
+        
+        horse.name = newName.trim();
+        
+        saveToLocal();
+        renderTree();
+        
+        // We manually update the text here so we don't have to re-select the horse
+        document.getElementById("panel-name").textContent = horse.name;
+    }
+
     // Button: Add Parent (Vatertier/Muttertier)
     function addParent(type) {
         if (!selectedHorseId) return;
@@ -239,11 +259,40 @@
         
         if (type === "Vatertier") child.sireId = null;
         else child.damId = null;
+        cleanupOrphans();
 
         saveToLocal();
 
         renderTree();
         selectHorse(selectedHorseId);
+    }
+
+    // --- GARBAGE COLLECTION ---
+    function cleanupOrphans() {
+        const activeIds = new Set();
+
+        // 2. Recursive function to mark a horse and its ancestors as "Active"
+        function markActive(id) {
+            if (!id || activeIds.has(id)) return;
+            
+            activeIds.add(id);
+            
+            const horse = getHorse(id);
+            if (horse) {
+                markActive(horse.sireId);
+                markActive(horse.damId);
+            }
+        }
+
+        markActive("h1");
+
+        const beforeCount = horses.length;
+        horses = horses.filter(h => activeIds.has(h.id));
+        
+        const deletedCount = beforeCount - horses.length;
+        if (deletedCount > 0) {
+            console.log(`Deleted ${deletedCount} loose nodes.`);
+        }
     }
 
     document.getElementById("btn-add-sire").onclick = () => addParent("Vatertier");
