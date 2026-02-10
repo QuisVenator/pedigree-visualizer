@@ -22,7 +22,7 @@
         .node circle { fill: #fff; stroke: #333; stroke-width: 2px; cursor: pointer; transition: all 0.3s; }
         .node circle:hover { fill: #e6f2ff; stroke: #007bff; }
         .node text { font: 12px sans-serif; pointer-events: none; text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff; }
-        .link { fill: none; stroke: #ccc; stroke-width: 2px; }
+        .link { fill: none; }
         .node.selected circle {
             stroke: #ff4500;  /* Orange-Red for visibility */
             stroke-width: 4px;
@@ -111,31 +111,37 @@
     const width = document.getElementById('graph-container').clientWidth;
     const height = document.getElementById('graph-container').clientHeight;
     
-    // Create SVG once
+    // 1. SETUP SVG & LAYERS (Must happen once)
     const svg = d3.select("#graph-container").append("svg")
         .attr("width", width)
         .attr("height", height)
         .call(d3.zoom().on("zoom", (e) => mainGroup.attr("transform", e.transform)));
-
+    
     const mainGroup = svg.append("g").attr("transform", "translate(50, 0)");
 
-    // KEY FIX: Create explicit layers so Links are ALWAYS behind Nodes
+    // Define layers: Link layer first (bottom), Node layer second (top)
     const linkLayer = mainGroup.append("g").attr("class", "link-layer");
     const nodeLayer = mainGroup.append("g").attr("class", "node-layer");
 
+    // 2. DEFINE VISUAL SCALES
+    // Thickness: 0% = 1px, 100% = 8px
+    const thicknessScale = d3.scaleSqrt().domain([0, 100]).range([1, 8]); 
+    // Color: 0% = Light Gray, 100% = Gold
+    const colorScale = d3.scaleSqrt().domain([0, 100]).range(["#cccccc", "#d4af37"]); 
+
     function renderTree() {
-        // 1. Build Data Hierarchy
+        // A. Build Data Hierarchy
         const buildHierarchy = (id) => {
             const h = getHorse(id);
             if (!h) return null;
             
+            // Calculate score here so it's available for drawing
             const node = { ...h, score: calculateScore(id) };
             const children = [];
             
             const sire = buildHierarchy(h.sireId);
             const dam = buildHierarchy(h.damId);
             
-            // Note: D3 Tree typically draws children (parents) to the right
             if (sire) children.push(sire);
             if (dam) children.push(dam);
             
@@ -143,27 +149,37 @@
             return node;
         };
 
+        // Safety: If no horses exist, stop
+        if (!horses || horses.length === 0) return;
+
         const rootData = buildHierarchy(horses[0].id);
         if (!rootData) return;
 
-        // 2. Compute Layout
+        // B. Calculate Layout
         const treeLayout = d3.tree().size([height - 100, width - 200]);
         const root = d3.hierarchy(rootData);
         treeLayout(root);
 
-        // 3. DRAW LINKS (into linkLayer)
-        // We use .selectAll with a key function (d.target.data.id) to track specific links
+        // C. DRAW LINKS (Using Scales)
         const links = linkLayer.selectAll(".link")
             .data(root.links(), d => d.target.data.id);
         
-        links.enter().append("path")
+        const linkEnter = links.enter().append("path")
             .attr("class", "link")
+            .attr("fill", "none")
+            // Start with current styles to prevent jumping
+            .attr("stroke-width", d => thicknessScale(d.target.data.score))
+            .attr("stroke", d => colorScale(d.target.data.score))
             .attr("d", d3.linkHorizontal()
                 .x(d => d.y)
                 .y(d => d.x)
-            )
-            .merge(links)
+            );
+
+        // Update animation
+        links.merge(linkEnter)
             .transition().duration(500)
+            .attr("stroke-width", d => thicknessScale(d.target.data.score))
+            .attr("stroke", d => colorScale(d.target.data.score))
             .attr("d", d3.linkHorizontal()
                 .x(d => d.y)
                 .y(d => d.x)
@@ -171,14 +187,14 @@
             
         links.exit().remove();
 
-        // 4. DRAW NODES (into nodeLayer)
+        // D. DRAW NODES (Standard)
         const nodes = nodeLayer.selectAll(".node")
             .data(root.descendants(), d => d.data.id);
 
         const nodeEnter = nodes.enter().append("g")
-            .attr("class", "node") // Base class
+            .attr("class", "node")
             .attr("transform", d => `translate(${d.y},${d.x})`)
-            .on("click", (e, d) => selectHorse(d.data.id)); // Click handler
+            .on("click", (e, d) => selectHorse(d.data.id));
 
         nodeEnter.append("circle").attr("r", 15);
         
@@ -193,22 +209,21 @@
             .style("font-size", "10px")
             .text(d => d.data.score + "%");
 
-        // UPDATE: Apply styles to new AND existing nodes
         const nodeUpdate = nodes.merge(nodeEnter);
         
         nodeUpdate.transition().duration(500)
             .attr("transform", d => `translate(${d.y},${d.x})`);
 
-        // DYNAMIC STYLING: Here is where we handle "HoF" and "Selected"
+        // Apply Classes (HoF / Selected)
         nodeUpdate.attr("class", d => {
             let classes = "node";
             if (d.data.isHoF) classes += " hof";
-            if (d.data.id === selectedHorseId) classes += " selected"; // <--- Highlight Logic
+            if (d.data.id === selectedHorseId) classes += " selected";
             return classes;
         });
 
-        nodeUpdate.select("text").text(d => d.data.name); 
-        nodeUpdate.select("text:last-child").text(d => d.data.score + "%");
+        nodeUpdate.select("text").text(d => d.data.name);
+        nodeUpdate.select("text:last-child").text(d => Number(d.data.score.toFixed(2)) + "%");
 
         nodes.exit().remove();
     }
@@ -227,7 +242,7 @@
         
         document.getElementById("panel-name").textContent = horse.name;
         document.getElementById("panel-status").textContent = horse.isHoF ? "Ja (100%)" : "Nein";
-        document.getElementById("panel-score").textContent = score + "%";
+        document.getElementById("panel-score").textContent = score.toFixed(10) + "%";
         const dropdown = document.getElementById("existing-horse-select");
 
         dropdown.innerHTML = ""; // Clear old options
