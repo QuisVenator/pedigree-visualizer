@@ -1,0 +1,32 @@
+
+body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; overflow: hidden; }
+
+/* Sidebar Styles */
+#sidebar { width: 300px; background: #f4f4f4; padding: 20px; border-right: 1px solid #ddd; display: flex; flex-direction: column; gap: 10px; }
+h2 { margin-top: 0; }
+.stat-box { background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+button { padding: 10px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; font-size: 14px; }
+button:hover { background: #0056b3; }
+button.secondary { background: #6c757d; }
+button.remove { background: #dc3545; }
+
+/* Graph Styles */
+#graph-container { flex-grow: 1; position: relative; background: #fff; }
+.node path { fill: #fff; stroke: #333; stroke-width: 2px; cursor: pointer; transition: all 0.3s; }
+.node path:hover { fill: #e6f2ff; stroke: #007bff; }
+.node text { font: 12px sans-serif; pointer-events: none; text-shadow: 0 1px 0 #fff, 1px 0 0 #fff, 0 -1px 0 #fff, -1px 0 0 #fff; }
+.link { fill: none; }
+.node.selected path {
+    stroke: #ff4500;  /* Orange-Red for visibility */
+    stroke-width: 4px;
+    fill: #fff5ee;    /* Slight tint */
+}
+.node.hof.selected path {
+    stroke: #ff4500; /* Selection overrides Gold border color */
+    stroke-width: 5px;
+    stroke-dasharray: 5, 2; /* Optional: dashed line to show it is special */
+}
+
+/* Hall of Fame Visuals */
+.node.hof path { stroke: #d4af37; stroke-width: 4px; fill: #fff8dc; } /* Gold */
+.node.hof text { font-weight: bold; fill: #8a6d1c; }
