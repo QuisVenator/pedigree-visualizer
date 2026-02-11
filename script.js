@@ -56,8 +56,26 @@ function renderTree() {
     const rootData = buildHierarchy(horses[0].id);
     if (!rootData) return;
 
-    const treeLayout = d3.tree().size([height - 100, width - 200]);
+
     const root = d3.hierarchy(rootData);
+
+    // Used to dynamically set height
+    const levelWidth = [1];
+    const childCount = (level, n) => {
+        if (n.children && n.children.length > 0) {
+            if (levelWidth.length <= level + 1) levelWidth.push(0);
+            levelWidth[level + 1] += n.children.length;
+            n.children.forEach(d => childCount(level + 1, d));
+        }
+    };
+    childCount(0, root);
+
+    const newHeight = d3.max(levelWidth) * 80; 
+    d3.select("svg").attr("height", newHeight + 100);
+
+    const treeLayout = d3.tree().size([newHeight-100, width - 200]);
+    console.log(`Old height  was ${height} and widht was ${width}`);
+    console.log(`Dynamic height is ${newHeight} and width is ${width - 200}`)
     treeLayout(root);
 
     const links = linkLayer.selectAll(".link")
